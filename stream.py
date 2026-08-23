@@ -40,7 +40,7 @@ ffmpeg_cmd = [
     "-af", "aresample=async=1:min_hard_comp=0.001:first_pts=0",
     "-fps_mode", "cfr",
     "-f", "flv",
-    "rtmp://a.rtmp.youtube.com/live2/5b8p-ezvf-rh1b-w50t-9272"
+    "rtmp://a.rtmp.youtube.com/live2/uvff-6dbq-eyu2-r74m-934w"
 ]
 
 while True:
