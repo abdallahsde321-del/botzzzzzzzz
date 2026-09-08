@@ -4,13 +4,13 @@ import signal
 import sys
 
 TIKTOK_URL = "https://www.tiktok.com/@d.shakertawfiqalaroury/live"
-YOUTUBE_RTMP = "rtmp://a.rtmp.youtube.com/live2/wcdu-tm0g-5dd6-8x3y-70vj"
+YOUTUBE_RTMP = "rtmp://a.rtmp.youtube.com/live2/4vm5-3h9h-1t7u-a7aa-0e57"
 
 STREAMLINK_CMD = [
     "streamlink",
     "--hls-live-edge", "2",
     "--ringbuffer-size", "512M",
-    "--http-cookies-file", "cookies.txt"
+    "--http-cookies-file", "cookies.txt",
     "--retry-streams", "10",
     "--retry-max", "0",
     "--stream-segment-attempts", "10",
