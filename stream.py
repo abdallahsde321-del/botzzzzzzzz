@@ -10,7 +10,6 @@ STREAMLINK_CMD = [
     "streamlink",
     "--hls-live-edge", "2",
     "--ringbuffer-size", "512M",
-    "--http-cookies-file", "cookies.txt",
     "--retry-streams", "10",
     "--retry-max", "0",
     "--stream-segment-attempts", "10",
