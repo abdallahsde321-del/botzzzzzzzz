@@ -4,8 +4,11 @@ import time
 import signal
 import sys
 
-TIKTOK_URL = "https://www.tiktok.com/@d.shakertawfiqalaroury/live"
-YOUTUBE_RTMP = "rtmp://a.rtmp.youtube.com/live2/wew2-r2mr-0fep-k29h-debh"
+tiktok_username = os.getenv("TIKTOK_USERNAME", "default_username")
+youtube_stream_key = os.getenv("YOUTUBE_STREAM_KEY", "YOUR_STREAM_KEY")
+
+TIKTOK_URL = f"https://www.tiktok.com/@{tiktok_username}/live"
+YOUTUBE_RTMP = f"rtmp://a.rtmp.youtube.com/live2/{youtube_stream_key}"
 
 CHECK_INTERVAL_OFFLINE = 30  
 
