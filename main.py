@@ -4,11 +4,11 @@ import time
 import signal
 import sys
 
-tiktok_username = os.getenv("TIKTOK_USERNAME", "default_username")
-youtube_stream_key = os.getenv("YOUTUBE_STREAM_KEY", "YOUR_STREAM_KEY")
+TIKTOK_USERNAME = "abdullahal3085"
+RESTREAM_KEY = "re_12012590_event216c0d891d6f41d9be05bac5387dbd46"
 
-TIKTOK_URL = f"https://www.tiktok.com/@{tiktok_username}/live"
-YOUTUBE_RTMP = f"rtmp://a.rtmp.youtube.com/live2/{youtube_stream_key}"
+TIKTOK_URL = f"https://www.tiktok.com/@{TIKTOK_USERNAME}/live"
+RESTREAM_RTMP = f"rtmp://live.restream.io/live/{RESTREAM_KEY}"
 
 CHECK_INTERVAL_OFFLINE = 30  
 
@@ -55,7 +55,7 @@ FFMPEG_CMD = [
     "-flvflags", "no_duration_filesize",
 
     "-f", "flv",
-    YOUTUBE_RTMP
+    RESTREAM_RTMP
 ]
 
 streamlink_process = None
@@ -94,7 +94,7 @@ signal.signal(signal.SIGTERM, signal_handler)
 
 
 print("========================================")
-print("TikTok Live Monitor & Auto-Restreamer")
+print("TikTok Live Monitor & Restreamer to Restream.io")
 print("Status: RUNNING & LISTENING...")
 print("========================================\n")
 
@@ -117,7 +117,7 @@ while True:
             time.sleep(CHECK_INTERVAL_OFFLINE)
             continue
 
-        print(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] Stream ONLINE! Starting Restream to YouTube...")
+        print(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] Stream ONLINE! Starting Restream to Restream.io...")
         
         ffmpeg_process = subprocess.Popen(
             FFMPEG_CMD,
