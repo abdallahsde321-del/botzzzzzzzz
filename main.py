@@ -3,24 +3,22 @@ import subprocess
 import time
 import signal
 import sys
+import gc
 
-TIKTOK_USERNAME = "abdullahal3085"
-RESTREAM_KEY = "re_12012590_event216c0d891d6f41d9be05bac5387dbd46"
+TIKTOK_URL = "https://www.tiktok.com/@abdullahal3085/live"
+YOUTUBE_RTMP = "rtmp://a.rtmp.youtube.com/live2/t1u5-kzfa-eep1-77yu-44q3"
 
-TIKTOK_URL = f"https://www.tiktok.com/@{TIKTOK_USERNAME}/live"
-RESTREAM_RTMP = f"rtmp://live.restream.io/live/{RESTREAM_KEY}"
-
-CHECK_INTERVAL_OFFLINE = 30  
+CHECK_INTERVAL_OFFLINE = 15
 
 STREAMLINK_CMD = [
     "streamlink",
-    "--hls-live-edge", "2",
+    "--hls-live-edge", "3",
     "--ringbuffer-size", "512M",
-    "--retry-streams", "2",
-    "--retry-max", "2",
+    "--retry-streams", "5",
+    "--retry-max", "5",
     "--stream-segment-attempts", "5",
-    "--stream-segment-timeout", "15",
-    "--stream-timeout", "30",
+    "--stream-segment-timeout", "10",
+    "--stream-timeout", "20",
     "--stdout",
     TIKTOK_URL,
     "best"
@@ -32,11 +30,9 @@ FFMPEG_CMD = [
     "-loglevel", "warning",
     "-stats",
 
-    "-dts_delta_threshold", "1",
-    "-fflags", "+genpts+discardcorrupt",
-    "-err_detect", "ignore_err",
-
-    "-thread_queue_size", "1024",
+    "-analyzeduration", "10000000",
+    "-probesize", "10000000",
+    "-thread_queue_size", "8192",
     "-i", "-",
 
     "-map", "0:v:0",
@@ -49,31 +45,32 @@ FFMPEG_CMD = [
     "-ac", "2",
     "-af", "aresample=async=1000:min_hard_comp=0.100000:first_pts=0",
 
-    "-fps_mode", "passthrough",
+    "-fflags", "+genpts+discardcorrupt",
+    "-avoid_negative_ts", "make_zero",
+    "-dts_delta_threshold", "2",
+    "-max_interleave_delta", "0",
     "-flush_packets", "1",
 
     "-flvflags", "no_duration_filesize",
 
     "-f", "flv",
-    RESTREAM_RTMP
+    YOUTUBE_RTMP
 ]
 
 streamlink_process = None
 ffmpeg_process = None
 
-
 def stop_process(process):
     if process and process.poll() is None:
         try:
             process.terminate()
-            process.wait(timeout=5)
+            process.wait(timeout=3)
         except Exception:
             try:
                 process.kill()
-                process.wait(timeout=3)
+                process.wait(timeout=2)
             except Exception:
                 pass
-
 
 def cleanup():
     global streamlink_process, ffmpeg_process
@@ -81,43 +78,43 @@ def cleanup():
     stop_process(streamlink_process)
     streamlink_process = None
     ffmpeg_process = None
-
+    gc.collect()
 
 def signal_handler(sig, frame):
-    print("\n[SYSTEM] Stopped by Railway / User.")
+    print("\n[SYSTEM] Received stop signal. Cleaning up...")
     cleanup()
     sys.exit(0)
-
 
 signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
 
-
 print("========================================")
-print("TikTok Live Monitor & Restreamer to Restream.io")
-print("Status: RUNNING & LISTENING...")
+print("TikTok -> YouTube Ultra-Native Restreamer")
+print("Status: 24/7 AUTOMATED MONITORING")
 print("========================================\n")
 
 while True:
     try:
         cleanup()
         
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Checking TikTok Live status...")
+        
         streamlink_process = subprocess.Popen(
             STREAMLINK_CMD,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
             bufsize=0
         )
 
-        time.sleep(3)
+        time.sleep(5)
         
         if streamlink_process.poll() is not None:
-            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Stream is OFFLINE. Re-checking in {CHECK_INTERVAL_OFFLINE} seconds...")
+            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] TikTok is OFFLINE. Re-checking in {CHECK_INTERVAL_OFFLINE}s...")
             cleanup()
             time.sleep(CHECK_INTERVAL_OFFLINE)
             continue
 
-        print(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] Stream ONLINE! Starting Restream to Restream.io...")
+        print(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] TikTok Live ONLINE! Forwarding feed to YouTube...")
         
         ffmpeg_process = subprocess.Popen(
             FFMPEG_CMD,
@@ -129,20 +126,26 @@ while True:
 
         streamlink_process.stdout.close()
 
-        ffmpeg_return = ffmpeg_process.wait()
-        
-        print(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] Stream ended (FFmpeg exit code: {ffmpeg_return}).")
+        while True:
+            sl_code = streamlink_process.poll()
+            ff_code = ffmpeg_process.poll()
+            
+            if sl_code is not None or ff_code is not None:
+                print(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] Stream ended. Terminating YouTube feed immediately...")
+                break
+                
+            time.sleep(2)
 
     except KeyboardInterrupt:
-        print("\nStopping...")
+        print("\nStopping application...")
         cleanup()
         break
 
     except Exception as e:
-        print(f"\n[ERROR] Unexpected error: {e}")
+        print(f"\n[ERROR] Unexpected issue: {e}")
 
     finally:
         cleanup()
 
-    print(f"Waiting {CHECK_INTERVAL_OFFLINE} seconds before checking for the next stream...\n")
+    print(f"Waiting {CHECK_INTERVAL_OFFLINE} seconds before listening for next stream...\n")
     time.sleep(CHECK_INTERVAL_OFFLINE)
