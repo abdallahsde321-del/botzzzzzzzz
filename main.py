@@ -5,7 +5,7 @@ import signal
 import sys
 import gc
 
-TIKTOK_URL = "https://www.tiktok.com/@abdoelhanat0/live"
+TIKTOK_URL = "https://www.tiktok.com/@___alzahabey4___/live"
 YOUTUBE_RTMP = "rtmp://a.rtmp.youtube.com/live2/t1u5-kzfa-eep1-77yu-44q3"
 
 CHECK_INTERVAL_OFFLINE = 15
