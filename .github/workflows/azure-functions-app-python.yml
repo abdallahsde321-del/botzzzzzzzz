@@ -4,8 +4,9 @@
 # For instructions see https://learn.microsoft.com/en-us/azure/azure-functions/create-first-function-vs-code-python?pivots=python-mode-configuration
 #
 # To configure this workflow:
-# 1. Set up the following secrets in your repository:
+# 1. Set up one of the following secrets in your repository:
 #   - AZURE_FUNCTIONAPP_PUBLISH_PROFILE
+#   - AZURE_RBAC_CREDENTIALS
 # 2. Change env variables for your configuration.
 #
 # For more information on:
@@ -35,11 +36,10 @@ jobs:
     - name: 'Checkout GitHub Action'
       uses: actions/checkout@v4
 
-    # If you want to use Azure RBAC instead of Publish Profile, then uncomment the task below
-    # - name: 'Login via Azure CLI'
-    #   uses: azure/login@v1
-    #   with:
-    #     creds: ${{ secrets.AZURE_RBAC_CREDENTIALS }} # set up AZURE_RBAC_CREDENTIALS secrets in your repository
+    - name: Azure Login
+      uses: Azure/login@v3.1.0
+      with:
+        creds: ${{ secrets.AZURE_RBAC_CREDENTIALS }} # set up AZURE_RBAC_CREDENTIALS secrets in your repository
 
     - name: Setup Python ${{ env.PYTHON_VERSION }} Environment
       uses: actions/setup-python@v4
