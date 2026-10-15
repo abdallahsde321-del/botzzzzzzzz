@@ -9,16 +9,18 @@ TIKTOK_URL = "https://www.tiktok.com/@___alzahabey4___/live"
 YOUTUBE_RTMP = "rtmp://a.rtmp.youtube.com/live2/t1u5-kzfa-eep1-77yu-44q3"
 
 CHECK_INTERVAL_OFFLINE = 15
+SESSION_RESET_DELAY = 15
 
 STREAMLINK_CMD = [
     "streamlink",
     "--hls-live-edge", "3",
-    "--ringbuffer-size", "512M",
+    "--hls-segment-threads", "3",
+    "--ringbuffer-size", "256M",
     "--retry-streams", "5",
     "--retry-max", "5",
     "--stream-segment-attempts", "5",
     "--stream-segment-timeout", "10",
-    "--stream-timeout", "20",
+    "--stream-timeout", "15",
     "--stdout",
     TIKTOK_URL,
     "best"
@@ -30,13 +32,15 @@ FFMPEG_CMD = [
     "-loglevel", "warning",
     "-stats",
 
+    "-thread_queue_size", "8192",
     "-analyzeduration", "10000000",
     "-probesize", "10000000",
-    "-thread_queue_size", "8192",
+    "-use_wallclock_as_timestamps", "1",
     "-i", "-",
 
     "-map", "0:v:0",
     "-c:v", "copy",
+    "-bsf:v", "dump_extra",
 
     "-map", "0:a:0?",
     "-c:a", "aac",
@@ -106,7 +110,7 @@ while True:
             bufsize=0
         )
 
-        time.sleep(5)
+        time.sleep(4)
         
         if streamlink_process.poll() is not None:
             print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] TikTok is OFFLINE. Re-checking in {CHECK_INTERVAL_OFFLINE}s...")
@@ -131,7 +135,10 @@ while True:
             ff_code = ffmpeg_process.poll()
             
             if sl_code is not None or ff_code is not None:
-                print(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] Stream ended. Terminating YouTube feed immediately...")
+                print(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] Stream ended. Terminating YouTube feed...")
+                cleanup()
+                print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Waiting {SESSION_RESET_DELAY}s for YouTube session reset...")
+                time.sleep(SESSION_RESET_DELAY)
                 break
                 
             time.sleep(2)
@@ -147,5 +154,4 @@ while True:
     finally:
         cleanup()
 
-    print(f"Waiting {CHECK_INTERVAL_OFFLINE} seconds before listening for next stream...\n")
     time.sleep(CHECK_INTERVAL_OFFLINE)
