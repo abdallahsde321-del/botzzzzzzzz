@@ -81,7 +81,6 @@ def make_streamlink_command():
         "streamlink",
         "--loglevel", "warning",
         "--hls-live-edge", "4",
-        "--hls-segment-threads", "2",
         "--ringbuffer-size", "128M",
         "--retry-streams", "5",
         "--retry-max", "10",
