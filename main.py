@@ -205,4 +205,36 @@ def main():
     log("Audio encoding: AAC 128k")
     log("Automatic reconnection: ON")
 
-    while not stop_event.is_set
+    while not stop_event.is_set():
+        started_at = time.monotonic()
+
+        try:
+            cleanup()
+            start_stream()
+
+        except Exception as exc:
+            log(f"Unexpected error: {exc}")
+
+        finally:
+            cleanup()
+
+        if stop_event.is_set():
+            break
+
+        elapsed = time.monotonic() - started_at
+
+        if elapsed > 60:
+            delay = RETRY_DELAY
+            log(f"Stream disconnected. Retrying in {delay}s...")
+        else:
+            delay = CHECK_INTERVAL_OFFLINE
+            log(f"Stream unavailable. Checking again in {delay}s...")
+
+        stop_event.wait(delay)
+
+    cleanup()
+    log("Relay stopped cleanly.")
+
+
+if __name__ == "__main__":
+    main()
