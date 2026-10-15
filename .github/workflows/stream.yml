@@ -1,0 +1,33 @@
+name: Run Restreamer Script
+
+on:
+  workflow_dispatch: # يتيح لك تشغيل البث يدوياً بزر Run workflow
+  schedule:
+    - cron: '0 */6 * * *' # يعيد تشغيله كل 6 ساعات تلقائياً لضمان استمرار البث
+
+jobs:
+  run-stream:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Restreamer
+        run: |
+          python main.py
