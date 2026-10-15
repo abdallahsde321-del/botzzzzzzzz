@@ -13,10 +13,11 @@ TIKTOK_URL = os.getenv(
     "https://www.tiktok.com/@abdullahal3085/live"
 ).strip()
 
-YOUTUBE_RTMP = os.getenv(
-    "YOUTUBE_RTMP",
-    "rtmp://a.rtmp.youtube.com/live2/43wg-ubwg-3wea-ezd4-7wj1"
-).strip()
+# دعم المفتاح المخفي YOUTUBE_STREAM_KEY أو الرابط المباشر YOUTUBE_RTMP
+STREAM_KEY = os.getenv("YOUTUBE_STREAM_KEY", "").strip()
+DEFAULT_RTMP = f"rtmp://a.rtmp.youtube.com/live2/{STREAM_KEY}" if STREAM_KEY else "rtmp://a.rtmp.youtube.com/live2/43wg-ubwg-3wea-ezd4-7wj1"
+
+YOUTUBE_RTMP = os.getenv("YOUTUBE_RTMP", DEFAULT_RTMP).strip()
 
 CHECK_INTERVAL_OFFLINE = 15
 RETRY_DELAY = 5
@@ -103,12 +104,19 @@ def make_ffmpeg_command():
         "-stats_period", "10",
         "-nostdin",
 
+        # Input
         "-thread_queue_size", "1024",
         "-i", "pipe:0",
 
+        # VIDEO: Re-encode to libx264 (حل مشكلة كوديك HEVC/AV1)
         "-map", "0:v:0",
-        "-c:v", "copy",
+        "-c:v", "libx264",
+        "-preset", "ultrafast",
+        "-tune", "zerolatency",
+        "-pix_fmt", "yuv420p",
+        "-g", "60",
 
+        # AUDIO: AAC 128k
         "-map", "0:a:0?",
         "-c:a", "aac",
         "-b:a", "128k",
@@ -116,11 +124,12 @@ def make_ffmpeg_command():
         "-ac", "2",
         "-af", "aresample=async=1000:min_hard_comp=0.100000:first_pts=0",
 
+        # Timestamp & Latency Optimizations
         "-fflags", "+genpts+discardcorrupt+nobuffer+fastseek",
         "-avoid_negative_ts", "make_zero",
         "-use_wallclock_as_timestamps", "1",
-        "-tune", "zerolatency",
 
+        # YouTube RTMP output
         "-flvflags", "no_duration_filesize",
         "-f", "flv",
         YOUTUBE_RTMP
@@ -169,7 +178,7 @@ def start_stream():
 
     streamlink_process.stdout.close()
 
-    log("Relay started. Video COPY; audio AAC 128k.")
+    log("Relay started. Video: H.264 (libx264 ultrafast); Audio: AAC 128k.")
 
     while not stop_event.is_set():
         sl_code = streamlink_process.poll()
@@ -200,7 +209,7 @@ def main():
         sys.exit(1)
 
     log("TikTok -> YouTube Relay Started")
-    log("Video encoding: OFF (COPY)")
+    log("Video encoding: H.264 (libx264 ultrafast)")
     log("Audio encoding: AAC 128k")
     log("Automatic reconnection: ON")
 
