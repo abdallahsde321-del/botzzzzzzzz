@@ -90,7 +90,7 @@ def make_streamlink_command():
         "--stream-timeout", "20",
         "--stdout",
         TIKTOK_URL,
-        "best"
+        "best,720p,480p,worst"
     ]
 
 
@@ -104,11 +104,15 @@ def make_ffmpeg_command():
         "-stats_period", "10",
         "-nostdin",
 
+        # تحديد حجم التحليل لمنع فشل التعرف على ترميز HEVC عبر الـ Pipe
+        "-probesize", "10000000",
+        "-analyzeduration", "10000000",
+
         # Input
         "-thread_queue_size", "1024",
         "-i", "pipe:0",
 
-        # VIDEO: Re-encode to libx264 (حل مشكلة كوديك HEVC/AV1)
+        # VIDEO: Re-encode to libx264 for YouTube compatibility
         "-map", "0:v:0",
         "-c:v", "libx264",
         "-preset", "ultrafast",
@@ -124,12 +128,12 @@ def make_ffmpeg_command():
         "-ac", "2",
         "-af", "aresample=async=1000:min_hard_comp=0.100000:first_pts=0",
 
-        # Timestamp & Latency Optimizations
+        # Timestamps & Latency Optimizations
         "-fflags", "+genpts+discardcorrupt+nobuffer+fastseek",
         "-avoid_negative_ts", "make_zero",
         "-use_wallclock_as_timestamps", "1",
 
-        # YouTube RTMP output
+        # Output to YouTube RTMP
         "-flvflags", "no_duration_filesize",
         "-f", "flv",
         YOUTUBE_RTMP
