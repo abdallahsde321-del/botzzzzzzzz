@@ -10,12 +10,12 @@ from datetime import datetime
 
 TIKTOK_URL = os.getenv(
     "TIKTOK_URL",
-    "https://www.tiktok.com/@abdullahal3085/live"
+    "https://www.tiktok.com/@d.shakertawfiqalaroury/live"
 ).strip()
 
 # دعم المفتاح المخفي YOUTUBE_STREAM_KEY أو الرابط المباشر YOUTUBE_RTMP
 STREAM_KEY = os.getenv("YOUTUBE_STREAM_KEY", "").strip()
-DEFAULT_RTMP = f"rtmp://a.rtmp.youtube.com/live2/{STREAM_KEY}" if STREAM_KEY else "rtmp://a.rtmp.youtube.com/live2/43wg-ubwg-3wea-ezd4-7wj1"
+DEFAULT_RTMP = f"rtmp://a.rtmp.youtube.com/live2/{STREAM_KEY}" if STREAM_KEY else "rtmp://a.rtmp.youtube.com/live2/2fzr-du01-suua-t16e-bag4"
 
 YOUTUBE_RTMP = os.getenv("YOUTUBE_RTMP", DEFAULT_RTMP).strip()
 
@@ -81,6 +81,8 @@ def make_streamlink_command():
     return [
         "streamlink",
         "--loglevel", "warning",
+        # إضافة User-Agent لتجاوز حظر خوادم TikTok وخير 404
+        "--http-header", "User-Agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
         "--hls-live-edge", "4",
         "--ringbuffer-size", "128M",
         "--retry-streams", "5",
@@ -104,7 +106,7 @@ def make_ffmpeg_command():
         "-stats_period", "10",
         "-nostdin",
 
-        # تحديد حجم التحليل لمنع فشل التعرف على ترميز HEVC عبر الـ Pipe
+        # إعدادات حجم التحليل للتعرف على ترميز HEVC / Enhanced FLV
         "-probesize", "10000000",
         "-analyzeduration", "10000000",
 
@@ -112,7 +114,7 @@ def make_ffmpeg_command():
         "-thread_queue_size", "1024",
         "-i", "pipe:0",
 
-        # VIDEO: Re-encode to libx264 for YouTube compatibility
+        # VIDEO: Re-encode to libx264 for YouTube
         "-map", "0:v:0",
         "-c:v", "libx264",
         "-preset", "ultrafast",
