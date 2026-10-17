@@ -100,15 +100,15 @@ def make_ffmpeg_command():
     return [
         "ffmpeg",
         "-hide_banner",
-        "-loglevel", "warning",
+        "-loglevel", "error",  # تصفية التحذيرات المتكررة مثل Late SEI
         "-stats_period", "10",
         "-nostdin",
 
         # Input
-        "-thread_queue_size", "1024",
+        "-thread_queue_size", "2048",
         "-i", "pipe:0",
 
-        # VIDEO: Re-encode to libx264 (حل مشكلة كوديك HEVC/AV1)
+        # VIDEO: Re-encode to libx264
         "-map", "0:v:0",
         "-c:v", "libx264",
         "-preset", "ultrafast",
