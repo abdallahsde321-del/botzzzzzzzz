@@ -13,7 +13,7 @@ TIKTOK_URL = os.getenv(
     "https://www.tiktok.com/@abdullahal3085/live"
 ).strip()
 
-# دعم المفتاح المخفي YOUTUBE_STREAM_KEY أو الرابط المباشر YOUTUBE_RTMP
+# ضع مفتاح البث الخاص بك هنا أو عبر متغير البيئة YOUTUBE_STREAM_KEY
 STREAM_KEY = os.getenv("YOUTUBE_STREAM_KEY", "").strip()
 DEFAULT_RTMP = f"rtmp://a.rtmp.youtube.com/live2/{STREAM_KEY}" if STREAM_KEY else "rtmp://a.rtmp.youtube.com/live2/43wg-ubwg-3wea-ezd4-7wj1"
 
@@ -100,16 +100,21 @@ def make_ffmpeg_command():
     return [
         "ffmpeg",
         "-hide_banner",
-        "-loglevel", "error",  # تصفية التحذيرات المتكررة مثل Late SEI
+        "-loglevel", "error",
         "-stats_period", "10",
         "-nostdin",
 
-        # Input
+        # زيادة سعة الفحص للتعرف الصحيح على مسارات الصوت والفيديو عبر الأنبوب
+        "-probesize", "10M",
+        "-analyzeduration", "10M",
         "-thread_queue_size", "2048",
         "-i", "pipe:0",
 
-        # VIDEO: Re-encode to libx264
-        "-map", "0:v:0",
+        # إهمال مسارات البيانات والنصوص غير المعرفة القادمة من تيك توك
+        "-sn", "-dn",
+
+        # VIDEO: إعادة الترميز إلى H.264
+        "-map", "0:v:0?",
         "-c:v", "libx264",
         "-preset", "ultrafast",
         "-tune", "zerolatency",
@@ -122,14 +127,13 @@ def make_ffmpeg_command():
         "-b:a", "128k",
         "-ar", "44100",
         "-ac", "2",
-        "-af", "aresample=async=1000:min_hard_comp=0.100000:first_pts=0",
 
-        # Timestamp & Latency Optimizations
+        # تحسين التوقيت وزمن الانتقال
         "-fflags", "+genpts+discardcorrupt+nobuffer+fastseek",
         "-avoid_negative_ts", "make_zero",
         "-use_wallclock_as_timestamps", "1",
 
-        # YouTube RTMP output
+        # إخراج RTMP إلى يوتيوب
         "-flvflags", "no_duration_filesize",
         "-f", "flv",
         YOUTUBE_RTMP
