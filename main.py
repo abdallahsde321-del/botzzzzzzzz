@@ -136,7 +136,7 @@ def make_ffmpeg_command(stream_url):
         "-ar", "44100",
         "-ac", "2",
 
-        # تحسين التوقيت وزمن الانتقال
+        # Timestamp & Latency Optimizations
         "-fflags", "+genpts+discardcorrupt+nobuffer+fastseek",
         "-avoid_negative_ts", "make_zero",
 
