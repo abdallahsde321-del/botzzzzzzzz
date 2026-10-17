@@ -13,7 +13,7 @@ TIKTOK_URL = os.getenv(
     "https://www.tiktok.com/@abdullahal3085/live"
 ).strip()
 
-# ضع مفتاح البث الخاص بك في متغير البيئة YOUTUBE_STREAM_KEY أو استبدله هنا
+# دعم المفتاح المخفي YOUTUBE_STREAM_KEY أو الرابط المباشر YOUTUBE_RTMP
 STREAM_KEY = os.getenv("YOUTUBE_STREAM_KEY", "").strip()
 DEFAULT_RTMP = f"rtmp://a.rtmp.youtube.com/live2/{STREAM_KEY}" if STREAM_KEY else "rtmp://a.rtmp.youtube.com/live2/43wg-ubwg-3wea-ezd4-7wj1"
 
@@ -73,7 +73,7 @@ signal.signal(signal.SIGINT, signal_handler)
 # ================== STREAMLINK URL EXTRACTION ==================
 
 def get_tiktok_stream_url():
-    """استخراج رابط M3U8 المباشر للبث بدون استخدام أنبوب"""
+    """استخراج رابط M3U8 المباشر للبث من Streamlink"""
     cmd = [
         "streamlink",
         "--stream-url",
@@ -88,10 +88,13 @@ def get_tiktok_stream_url():
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            timeout=20
+            timeout=25
         )
         if result.returncode == 0 and result.stdout.strip().startswith("http"):
             return result.stdout.strip()
+        else:
+            if result.stderr:
+                log(f"Streamlink notice: {result.stderr.strip()}")
     except Exception as e:
         log(f"Streamlink extraction error: {e}")
     return None
@@ -107,7 +110,7 @@ def make_ffmpeg_command(stream_url):
         "-stats_period", "10",
         "-nostdin",
 
-        # إعدادات إعادة الاتصال التلقائي لقراءة HLS مباشرة
+        # إعدادات إعادة الاتصال المباشرة لقراءة HLS
         "-reconnect", "1",
         "-reconnect_streamed", "1",
         "-reconnect_delay_max", "5",
@@ -116,25 +119,24 @@ def make_ffmpeg_command(stream_url):
         # Input
         "-i", stream_url,
 
-        # إهمال البيانات والترجمة غير المعرفة
+        # إهمال البيانات والترجمة والمسارات المجهولة
         "-sn", "-dn",
+        "-ignore_unknown",
 
-        # VIDEO: Re-encode to libx264
-        "-map", "0:v:0?",
+        # VIDEO: إعادة الترميز إلى H.264 (الاختيار التلقائي للمسار الصالح)
         "-c:v", "libx264",
         "-preset", "ultrafast",
         "-tune", "zerolatency",
         "-pix_fmt", "yuv420p",
         "-g", "60",
 
-        # AUDIO: AAC 128k
-        "-map", "0:a:0?",
+        # AUDIO: AAC 128k (الاختيار التلقائي للمسار الصالح)
         "-c:a", "aac",
         "-b:a", "128k",
         "-ar", "44100",
         "-ac", "2",
 
-        # Timestamp & Latency Optimizations
+        # تحسين التوقيت وزمن الانتقال
         "-fflags", "+genpts+discardcorrupt+nobuffer+fastseek",
         "-avoid_negative_ts", "make_zero",
 
