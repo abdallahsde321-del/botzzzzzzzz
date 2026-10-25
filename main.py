@@ -16,7 +16,7 @@ TIKTOK_URL = os.getenv(
 
 YOUTUBE_RTMP = os.getenv(
     "YOUTUBE_RTMP",
-    "rtmp://a.rtmp.youtube.com/live2/5czj-a0sq-5cmp-4aps-bq5h"
+    "rtmp://a.rtmp.youtube.com/live2/9gs2-gayu-3pjh-wda0-1tp7"
 ).strip()
 
 TIKTOK_SESSIONID = os.getenv(
@@ -173,13 +173,18 @@ def run_streaming_session():
 
     log("Direct stream URL acquired successfully.")
 
+    # تمرير Headers و Cookies مع رابط المدخل لكي لا يتم رفض الطلب من تيك توك
+    user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+    headers_str = f"User-Agent: {user_agent}\r\nCookie: sessionid={TIKTOK_SESSIONID}\r\n"
+
     ffmpeg_cmd = [
         "ffmpeg",
         "-hide_banner",
         "-loglevel", "warning",
         "-nostdin",
 
-        # إزالة -f flv من المدخل لأن الرابط الأساسي HLS ويتم اكتشافه تلقائياً
+        # Headers لمنع خطأ الرفض والانهيار (-11)
+        "-headers", headers_str,
         "-fflags", "+genpts+discardcorrupt",
         "-i", stream_url,
 
@@ -252,7 +257,7 @@ def main():
 
     setup_cookies_file()
 
-    log("TikTok -> YouTube supervisor started (Direct URL Auto-Detect mode).")
+    log("TikTok -> YouTube supervisor started (Headers Fixed mode).")
     log("Video: COPY | Audio: AAC 128 kbps.")
     log("Automatic reconnection: enabled.")
 
