@@ -179,7 +179,8 @@ def run_streaming_session():
         "-loglevel", "warning",
         "-nostdin",
 
-        # Input stream URL directly to FFmpeg
+        # تحديد صيغة البث المباشر لتيك توك لمنع الانهيار
+        "-f", "flv",
         "-fflags", "+genpts+discardcorrupt",
         "-i", stream_url,
 
@@ -252,13 +253,12 @@ def main():
 
     setup_cookies_file()
 
-    log("TikTok -> YouTube supervisor started (Direct URL mode).")
+    log("TikTok -> YouTube supervisor started (Direct URL + FLV mode).")
     log("Video: COPY | Audio: AAC 128 kbps.")
     log("Automatic reconnection: enabled.")
 
     while not stop_requested:
         try:
-            # Check if live using the same get_direct_stream_url function
             stream_url = get_direct_stream_url()
             if not stream_url:
                 log("TikTok is offline or the stream is unavailable.")
