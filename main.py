@@ -19,6 +19,11 @@ YOUTUBE_RTMP = os.getenv(
     "rtmp://a.rtmp.youtube.com/live2/5czj-a0sq-5cmp-4aps-bq5h"
 ).strip()
 
+TIKTOK_SESSIONID = os.getenv(
+    "TIKTOK_SESSIONID",
+    "8df3a0ebb15a97c1452dc36915f86aef"
+)
+
 CHECK_INTERVAL_OFFLINE = 10
 RETRY_DELAY = 5
 CLEANUP_DELAY = 8
@@ -72,7 +77,6 @@ def stop_process(proc):
 
 
 def stop_all_processes():
-    # Close FFmpeg before Streamlink.
     for proc in reversed(active_processes[:]):
         stop_process(proc)
 
@@ -92,13 +96,14 @@ signal.signal(signal.SIGINT, signal_handler)
 
 
 # =========================================================
-# Check whether TikTok is live
+# Check whether TikTok is live using Streamlink + Cookie
 # =========================================================
 
 def is_tiktok_live():
     command = [
         "streamlink",
         "--loglevel", "error",
+        "--http-header", f"Cookie=sessionid={TIKTOK_SESSIONID}",
         "--stream-timeout", "15",
         "--stream-url",
         TIKTOK_URL,
@@ -117,26 +122,23 @@ def is_tiktok_live():
 
         url = result.stdout.strip()
 
-        if result.returncode == 0 and url.startswith(
-            ("http://", "https://")
-        ):
-            log("TikTok live detected.")
+        if result.returncode == 0 and url.startswith(("http://", "https://")):
+            log("TikTok live detected via Streamlink.")
             return True
 
-        log("TikTok is offline or the stream is unavailable.")
         return False
 
     except subprocess.TimeoutExpired:
         log("TikTok detection timed out.")
         return False
 
-    except OSError as exc:
+    except Exception as exc:
         log(f"Streamlink detection error: {exc}")
         return False
 
 
 # =========================================================
-# Run one fresh relay session
+# Run one fresh relay session (Streamlink Pipe -> FFmpeg)
 # =========================================================
 
 def run_streaming_session():
@@ -154,10 +156,7 @@ def run_streaming_session():
         "--stream-segment-attempts", "3",
         "--stream-segment-timeout", "15",
         "--stream-timeout", "20",
-        "--http-header",
-        "User-Agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/125.0.0.0 Safari/537.36",
+        "--http-header", f"Cookie=sessionid={TIKTOK_SESSIONID}",
         "--stdout",
         TIKTOK_URL,
         "best"
@@ -169,7 +168,7 @@ def run_streaming_session():
         "-loglevel", "warning",
         "-nostdin",
 
-        # Input from Streamlink
+        # Input from Streamlink Pipe
         "-fflags", "+genpts+discardcorrupt",
         "-i", "pipe:0",
 
@@ -226,17 +225,11 @@ def run_streaming_session():
 
         while not stop_requested:
             if streamlink_proc.poll() is not None:
-                log(
-                    "Streamlink exited with code "
-                    f"{streamlink_proc.returncode}."
-                )
+                log(f"Streamlink exited with code {streamlink_proc.returncode}.")
                 break
 
             if ffmpeg_proc.poll() is not None:
-                log(
-                    "FFmpeg exited with code "
-                    f"{ffmpeg_proc.returncode}."
-                )
+                log(f"FFmpeg exited with code {ffmpeg_proc.returncode}.")
                 break
 
             time.sleep(1)
@@ -273,13 +266,14 @@ def main():
         log("ERROR: YOUTUBE_RTMP is empty.")
         sys.exit(1)
 
-    log("TikTok -> YouTube supervisor started.")
+    log("TikTok -> YouTube supervisor started (Streamlink + Cookie mode).")
     log("Video: COPY | Audio: AAC 128 kbps.")
     log("Automatic reconnection: enabled.")
 
     while not stop_requested:
         try:
             if not is_tiktok_live():
+                log("TikTok is offline or the stream is unavailable.")
                 wait_interruptibly(CHECK_INTERVAL_OFFLINE)
                 continue
 
@@ -292,10 +286,7 @@ def main():
                 break
 
             if duration >= MIN_REAL_SESSION:
-                log(
-                    f"Waiting {CLEANUP_DELAY} seconds "
-                    "before checking for a new live."
-                )
+                log(f"Waiting {CLEANUP_DELAY} seconds before checking for a new live.")
                 wait_interruptibly(CLEANUP_DELAY)
             else:
                 log(f"Retrying in {RETRY_DELAY} seconds.")
