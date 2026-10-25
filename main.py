@@ -1,4 +1,3 @@
-
 import os
 import sys
 import time
@@ -12,18 +11,13 @@ from datetime import datetime
 
 TIKTOK_URL = os.getenv(
     "TIKTOK_URL",
-    "https://www.tiktok.com/@almurtadmazin/live?enter_from_merge=general_search&enter_method=others_photo&search_id=20261026064225A6A96AB1385BA554B87A&search_keyword=almurtadmazin&search_result_id=7184705875612943366&search_type=general"
+    "https://www.tiktok.com/@anass_bn67/live"
 )
 
 YOUTUBE_RTMP = os.getenv(
     "YOUTUBE_RTMP",
     "rtmp://a.rtmp.youtube.com/live2/5czj-a0sq-5cmp-4aps-bq5h"
 ).strip()
-
-TIKTOK_SESSIONID = os.getenv(
-    "TIKTOK_SESSIONID",
-    "8df3a0ebb15a97c1452dc36915f86aef"
-)
 
 CHECK_INTERVAL_OFFLINE = 10
 RETRY_DELAY = 5
@@ -33,21 +27,6 @@ MIN_REAL_SESSION = 20
 
 stop_requested = False
 active_processes = []
-
-
-# =========================================================
-# Setup Cookies File for yt-dlp
-# =========================================================
-
-def setup_cookies_file():
-    if TIKTOK_SESSIONID:
-        try:
-            with open("cookies.txt", "w", encoding="utf-8") as f:
-                f.write("# Netscape HTTP Cookie File\n")
-                f.write(f".tiktok.com\tTRUE\t/\tTRUE\t2147483647\tsessionid\t{TIKTOK_SESSIONID}\n")
-            print("[INFO] cookies.txt generated successfully.", flush=True)
-        except Exception as e:
-            print(f"[WARNING] Failed to create cookies.txt: {e}", flush=True)
 
 
 # =========================================================
@@ -93,6 +72,7 @@ def stop_process(proc):
 
 
 def stop_all_processes():
+    # Close FFmpeg before Streamlink.
     for proc in reversed(active_processes[:]):
         stop_process(proc)
 
@@ -117,15 +97,13 @@ signal.signal(signal.SIGINT, signal_handler)
 
 def is_tiktok_live():
     command = [
-        "yt-dlp",
-        "--get-url",
-        "--no-warnings",
+        "streamlink",
+        "--loglevel", "error",
+        "--stream-timeout", "15",
+        "--stream-url",
+        TIKTOK_URL,
+        "best"
     ]
-    
-    if os.path.exists("cookies.txt"):
-        command.extend(["--cookies", "cookies.txt"])
-        
-    command.append(TIKTOK_URL)
 
     try:
         result = subprocess.run(
@@ -138,36 +116,52 @@ def is_tiktok_live():
         )
 
         url = result.stdout.strip()
-        if result.returncode == 0 and url:
-            log("TikTok live detected via yt-dlp.")
+
+        if result.returncode == 0 and url.startswith(
+            ("http://", "https://")
+        ):
+            log("TikTok live detected.")
             return True
 
+        log("TikTok is offline or the stream is unavailable.")
         return False
 
-    except Exception:
+    except subprocess.TimeoutExpired:
+        log("TikTok detection timed out.")
+        return False
+
+    except OSError as exc:
+        log(f"Streamlink detection error: {exc}")
         return False
 
 
 # =========================================================
-# Run one fresh relay session using yt-dlp MPEG-TS Pipe -> FFmpeg
+# Run one fresh relay session
 # =========================================================
 
 def run_streaming_session():
     start_time = time.monotonic()
-    ytdl_proc = None
+    streamlink_proc = None
     ffmpeg_proc = None
 
-    ytdl_cmd = [
-        "yt-dlp",
-        "--no-warnings",
-        "--hls-use-mpegts",  # حل مشكلة توافق صيغة البث مع الأنبوب
-        "-o", "-",
+    streamlink_cmd = [
+        "streamlink",
+        "--loglevel", "warning",
+        "--ringbuffer-size", "512M",
+        "--stream-segment-threads", "2",
+        "--retry-streams", "1",
+        "--retry-max", "1",
+        "--stream-segment-attempts", "3",
+        "--stream-segment-timeout", "15",
+        "--stream-timeout", "20",
+        "--http-header",
+        "User-Agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/125.0.0.0 Safari/537.36",
+        "--stdout",
+        TIKTOK_URL,
+        "best"
     ]
-    
-    if os.path.exists("cookies.txt"):
-        ytdl_cmd.extend(["--cookies", "cookies.txt"])
-        
-    ytdl_cmd.append(TIKTOK_URL)
 
     ffmpeg_cmd = [
         "ffmpeg",
@@ -175,7 +169,7 @@ def run_streaming_session():
         "-loglevel", "warning",
         "-nostdin",
 
-        # Input from yt-dlp pipe
+        # Input from Streamlink
         "-fflags", "+genpts+discardcorrupt",
         "-i", "pipe:0",
 
@@ -204,21 +198,21 @@ def run_streaming_session():
         if stop_requested:
             return 0
 
-        log("Starting yt-dlp MPEG-TS stream extractor...")
+        log("Starting Streamlink...")
 
-        ytdl_proc = subprocess.Popen(
-            ytdl_cmd,
+        streamlink_proc = subprocess.Popen(
+            streamlink_cmd,
             stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
+            stderr=None,
             bufsize=0
         )
-        active_processes.append(ytdl_proc)
+        active_processes.append(streamlink_proc)
 
         log("Starting FFmpeg -> YouTube RTMP...")
 
         ffmpeg_proc = subprocess.Popen(
             ffmpeg_cmd,
-            stdin=ytdl_proc.stdout,
+            stdin=streamlink_proc.stdout,
             stdout=subprocess.DEVNULL,
             stderr=None,
             bufsize=0
@@ -226,31 +220,43 @@ def run_streaming_session():
         active_processes.append(ffmpeg_proc)
 
         # Close the parent's copy of the pipe.
-        ytdl_proc.stdout.close()
+        streamlink_proc.stdout.close()
 
         log("Relay session started.")
 
         while not stop_requested:
-            if ytdl_proc.poll() is not None:
-                log(f"yt-dlp exited with code {ytdl_proc.returncode}.")
+            if streamlink_proc.poll() is not None:
+                log(
+                    "Streamlink exited with code "
+                    f"{streamlink_proc.returncode}."
+                )
                 break
 
             if ffmpeg_proc.poll() is not None:
-                log(f"FFmpeg exited with code {ffmpeg_proc.returncode}.")
+                log(
+                    "FFmpeg exited with code "
+                    f"{ffmpeg_proc.returncode}."
+                )
                 break
 
             time.sleep(1)
 
-    except Exception as exc:
+    except (OSError, subprocess.SubprocessError) as exc:
         log(f"Relay error: {exc}")
 
     finally:
         stop_process(ffmpeg_proc)
-        stop_process(ytdl_proc)
+        stop_process(streamlink_proc)
 
-        for proc in (ffmpeg_proc, ytdl_proc):
+        for proc in (ffmpeg_proc, streamlink_proc):
             if proc in active_processes:
                 active_processes.remove(proc)
+
+        if streamlink_proc and streamlink_proc.stdout:
+            try:
+                streamlink_proc.stdout.close()
+            except OSError:
+                pass
 
     duration = time.monotonic() - start_time
     log(f"Relay session closed after {duration:.1f} seconds.")
@@ -267,16 +273,13 @@ def main():
         log("ERROR: YOUTUBE_RTMP is empty.")
         sys.exit(1)
 
-    setup_cookies_file()
-
-    log("TikTok -> YouTube supervisor started (MPEG-TS Pipe Mode).")
+    log("TikTok -> YouTube supervisor started.")
     log("Video: COPY | Audio: AAC 128 kbps.")
     log("Automatic reconnection: enabled.")
 
     while not stop_requested:
         try:
             if not is_tiktok_live():
-                log("TikTok is offline or the stream is unavailable.")
                 wait_interruptibly(CHECK_INTERVAL_OFFLINE)
                 continue
 
