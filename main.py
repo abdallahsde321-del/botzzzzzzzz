@@ -172,9 +172,15 @@ def run_streaming_session():
         "-fflags", "+genpts+discardcorrupt",
         "-i", "pipe:0",
 
-        # Video: copy original encoded video
+        # Video: Re-encode using libx264 to support all modern TikTok codecs
         "-map", "0:v:0",
-        "-c:v", "copy",
+        "-c:v", "libx264",
+        "-preset", "ultrafast",
+        "-tune", "zerolatency",
+        "-b:v", "2000k",
+        "-maxrate", "2500k",
+        "-bufsize", "4000k",
+        "-pix_fmt", "yuv420p",
 
         # Audio: AAC encoding
         "-map", "0:a:0?",
@@ -266,8 +272,8 @@ def main():
         log("ERROR: YOUTUBE_RTMP is empty.")
         sys.exit(1)
 
-    log("TikTok -> YouTube supervisor started (Streamlink + Cookie mode).")
-    log("Video: COPY | Audio: AAC 128 kbps.")
+    log("TikTok -> YouTube supervisor started (Re-encode mode).")
+    log("Video: H.264 (ultrafast) | Audio: AAC 128 kbps.")
     log("Automatic reconnection: enabled.")
 
     while not stop_requested:
