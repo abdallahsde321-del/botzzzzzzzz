@@ -10,12 +10,12 @@ from datetime import datetime
 
 TIKTOK_URL = os.getenv(
     "TIKTOK_URL",
-    "https://www.tiktok.com/@abdullahal3085/live"
+    "https://www.tiktok.com/@almurtadmazin/live"
 ).strip()
 
 # دعم المفتاح المخفي YOUTUBE_STREAM_KEY أو الرابط المباشر YOUTUBE_RTMP
 STREAM_KEY = os.getenv("YOUTUBE_STREAM_KEY", "").strip()
-DEFAULT_RTMP = f"rtmp://a.rtmp.youtube.com/live2/{STREAM_KEY}" if STREAM_KEY else "rtmp://a.rtmp.youtube.com/live2/43wg-ubwg-3wea-ezd4-7wj1"
+DEFAULT_RTMP = f"rtmp://a.rtmp.youtube.com/live2/{STREAM_KEY}" if STREAM_KEY else "rtmp://a.rtmp.youtube.com/live2/9gs2-gayu-3pjh-wda0-1tp7"
 
 YOUTUBE_RTMP = os.getenv("YOUTUBE_RTMP", DEFAULT_RTMP).strip()
 
