@@ -16,7 +16,7 @@ TIKTOK_URL = os.getenv(
 
 YOUTUBE_RTMP = os.getenv(
     "YOUTUBE_RTMP",
-    "rtmp://a.rtmp.youtube.com/live2/9gs2-gayu-3pjh-wda0-1tp7"
+    "rtmp://a.rtmp.youtube.com/live2/5czj-a0sq-5cmp-4aps-bq5h"
 ).strip()
 
 TIKTOK_SESSIONID = os.getenv(
