@@ -72,7 +72,6 @@ def stop_process(proc):
 
 
 def stop_all_processes():
-    # Close FFmpeg before Streamlink.
     for proc in reversed(active_processes[:]):
         stop_process(proc)
 
@@ -92,17 +91,15 @@ signal.signal(signal.SIGINT, signal_handler)
 
 
 # =========================================================
-# Check whether TikTok is live
+# Check whether TikTok is live using yt-dlp
 # =========================================================
 
 def is_tiktok_live():
     command = [
-        "streamlink",
-        "--loglevel", "debug",
-        "--stream-timeout", "15",
-        "--stream-url",
-        TIKTOK_URL,
-        "best"
+        "yt-dlp",
+        "--get-url",
+        "--no-warnings",
+        TIKTOK_URL
     ]
 
     try:
@@ -117,57 +114,42 @@ def is_tiktok_live():
 
         url = result.stdout.strip()
 
-        if result.returncode == 0 and url.startswith(
-            ("http://", "https://")
-        ):
-            log("TikTok live detected.")
+        if result.returncode == 0 and url:
+            log("TikTok live detected via yt-dlp.")
             return True
 
-        # طباعة الخطأ الفعلي القادم من Streamlink لمعرفة سبب المشكلة بالتحديد
         err_output = result.stderr.strip()
         if err_output:
-            last_lines = "\n".join(err_output.splitlines()[-5:])
-            log(f"TikTok check failed. Streamlink error:\n{last_lines}")
+            last_line = err_output.splitlines()[-1]
+            log(f"yt-dlp check note: {last_line}")
         else:
             log("TikTok is offline or the stream is unavailable.")
-            
+
         return False
 
     except subprocess.TimeoutExpired:
         log("TikTok detection timed out.")
         return False
 
-    except OSError as exc:
-        log(f"Streamlink detection error: {exc}")
+    except Exception as exc:
+        log(f"yt-dlp detection error: {exc}")
         return False
 
 
 # =========================================================
-# Run one fresh relay session
+# Run one fresh relay session using yt-dlp + ffmpeg
 # =========================================================
 
 def run_streaming_session():
     start_time = time.monotonic()
-    streamlink_proc = None
+    ytdl_proc = None
     ffmpeg_proc = None
 
-    streamlink_cmd = [
-        "streamlink",
-        "--loglevel", "warning",
-        "--ringbuffer-size", "512M",
-        "--stream-segment-threads", "2",
-        "--retry-streams", "1",
-        "--retry-max", "1",
-        "--stream-segment-attempts", "3",
-        "--stream-segment-timeout", "15",
-        "--stream-timeout", "20",
-        "--http-header",
-        "User-Agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/125.0.0.0 Safari/537.36",
-        "--stdout",
-        TIKTOK_URL,
-        "best"
+    ytdl_cmd = [
+        "yt-dlp",
+        "--no-warnings",
+        "-o", "-",
+        TIKTOK_URL
     ]
 
     ffmpeg_cmd = [
@@ -176,7 +158,7 @@ def run_streaming_session():
         "-loglevel", "warning",
         "-nostdin",
 
-        # Input from Streamlink
+        # Input from yt-dlp pipe
         "-fflags", "+genpts+discardcorrupt",
         "-i", "pipe:0",
 
@@ -205,21 +187,21 @@ def run_streaming_session():
         if stop_requested:
             return 0
 
-        log("Starting Streamlink...")
+        log("Starting yt-dlp stream extractor...")
 
-        streamlink_proc = subprocess.Popen(
-            streamlink_cmd,
+        ytdl_proc = subprocess.Popen(
+            ytdl_cmd,
             stdout=subprocess.PIPE,
-            stderr=None,
+            stderr=subprocess.DEVNULL,
             bufsize=0
         )
-        active_processes.append(streamlink_proc)
+        active_processes.append(ytdl_proc)
 
         log("Starting FFmpeg -> YouTube RTMP...")
 
         ffmpeg_proc = subprocess.Popen(
             ffmpeg_cmd,
-            stdin=streamlink_proc.stdout,
+            stdin=ytdl_proc.stdout,
             stdout=subprocess.DEVNULL,
             stderr=None,
             bufsize=0
@@ -227,43 +209,31 @@ def run_streaming_session():
         active_processes.append(ffmpeg_proc)
 
         # Close the parent's copy of the pipe.
-        streamlink_proc.stdout.close()
+        ytdl_proc.stdout.close()
 
         log("Relay session started.")
 
         while not stop_requested:
-            if streamlink_proc.poll() is not None:
-                log(
-                    "Streamlink exited with code "
-                    f"{streamlink_proc.returncode}."
-                )
+            if ytdl_proc.poll() is not None:
+                log(f"yt-dlp exited with code {ytdl_proc.returncode}.")
                 break
 
             if ffmpeg_proc.poll() is not None:
-                log(
-                    "FFmpeg exited with code "
-                    f"{ffmpeg_proc.returncode}."
-                )
+                log(f"FFmpeg exited with code {ffmpeg_proc.returncode}.")
                 break
 
             time.sleep(1)
 
-    except (OSError, subprocess.SubprocessError) as exc:
+    except Exception as exc:
         log(f"Relay error: {exc}")
 
     finally:
         stop_process(ffmpeg_proc)
-        stop_process(streamlink_proc)
+        stop_process(ytdl_proc)
 
-        for proc in (ffmpeg_proc, streamlink_proc):
+        for proc in (ffmpeg_proc, ytdl_proc):
             if proc in active_processes:
                 active_processes.remove(proc)
-
-        if streamlink_proc and streamlink_proc.stdout:
-            try:
-                streamlink_proc.stdout.close()
-            except OSError:
-                pass
 
     duration = time.monotonic() - start_time
     log(f"Relay session closed after {duration:.1f} seconds.")
@@ -280,7 +250,7 @@ def main():
         log("ERROR: YOUTUBE_RTMP is empty.")
         sys.exit(1)
 
-    log("TikTok -> YouTube supervisor started.")
+    log("TikTok -> YouTube supervisor started (using yt-dlp).")
     log("Video: COPY | Audio: AAC 128 kbps.")
     log("Automatic reconnection: enabled.")
 
