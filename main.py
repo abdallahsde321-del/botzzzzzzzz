@@ -179,8 +179,7 @@ def run_streaming_session():
         "-loglevel", "warning",
         "-nostdin",
 
-        # تحديد صيغة البث المباشر لتيك توك لمنع الانهيار
-        "-f", "flv",
+        # إزالة -f flv من المدخل لأن الرابط الأساسي HLS ويتم اكتشافه تلقائياً
         "-fflags", "+genpts+discardcorrupt",
         "-i", stream_url,
 
@@ -253,7 +252,7 @@ def main():
 
     setup_cookies_file()
 
-    log("TikTok -> YouTube supervisor started (Direct URL + FLV mode).")
+    log("TikTok -> YouTube supervisor started (Direct URL Auto-Detect mode).")
     log("Video: COPY | Audio: AAC 128 kbps.")
     log("Automatic reconnection: enabled.")
 
