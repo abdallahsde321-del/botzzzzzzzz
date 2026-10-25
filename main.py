@@ -19,6 +19,12 @@ YOUTUBE_RTMP = os.getenv(
     "rtmp://a.rtmp.youtube.com/live2/9gs2-gayu-3pjh-wda0-1tp7"
 ).strip()
 
+# كوكيز الجلسة لتخطي قيود تيك توك وبث الحسابات المقيدة
+TIKTOK_SESSIONID = os.getenv(
+    "TIKTOK_SESSIONID",
+    "8df3a0ebb15a97c1452dc36915f86aef"
+)
+
 CHECK_INTERVAL_OFFLINE = 10
 RETRY_DELAY = 5
 CLEANUP_DELAY = 8
@@ -27,6 +33,21 @@ MIN_REAL_SESSION = 20
 
 stop_requested = False
 active_processes = []
+
+
+# =========================================================
+# Setup Cookies File for yt-dlp
+# =========================================================
+
+def setup_cookies_file():
+    if TIKTOK_SESSIONID:
+        try:
+            with open("cookies.txt", "w", encoding="utf-8") as f:
+                f.write("# Netscape HTTP Cookie File\n")
+                f.write(f".tiktok.com\tTRUE\t/\tTRUE\t2147483647\tsessionid\t{TIKTOK_SESSIONID}\n")
+            print("[INFO] cookies.txt generated successfully.", flush=True)
+        except Exception as e:
+            print(f"[WARNING] Failed to create cookies.txt: {e}", flush=True)
 
 
 # =========================================================
@@ -91,7 +112,7 @@ signal.signal(signal.SIGINT, signal_handler)
 
 
 # =========================================================
-# Check whether TikTok is live using yt-dlp
+# Check whether TikTok is live using yt-dlp + Cookies
 # =========================================================
 
 def is_tiktok_live():
@@ -99,8 +120,12 @@ def is_tiktok_live():
         "yt-dlp",
         "--get-url",
         "--no-warnings",
-        TIKTOK_URL
     ]
+    
+    if os.path.exists("cookies.txt"):
+        command.extend(["--cookies", "cookies.txt"])
+        
+    command.append(TIKTOK_URL)
 
     try:
         result = subprocess.run(
@@ -148,9 +173,12 @@ def run_streaming_session():
     ytdl_cmd = [
         "yt-dlp",
         "--no-warnings",
-        "-o", "-",
-        TIKTOK_URL
     ]
+    
+    if os.path.exists("cookies.txt"):
+        ytdl_cmd.extend(["--cookies", "cookies.txt"])
+        
+    ytdl_cmd.extend(["-o", "-", TIKTOK_URL])
 
     ffmpeg_cmd = [
         "ffmpeg",
@@ -250,7 +278,9 @@ def main():
         log("ERROR: YOUTUBE_RTMP is empty.")
         sys.exit(1)
 
-    log("TikTok -> YouTube supervisor started (using yt-dlp).")
+    setup_cookies_file()
+
+    log("TikTok -> YouTube supervisor started (using yt-dlp + Cookies).")
     log("Video: COPY | Audio: AAC 128 kbps.")
     log("Automatic reconnection: enabled.")
 
