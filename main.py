@@ -98,7 +98,7 @@ signal.signal(signal.SIGINT, signal_handler)
 def is_tiktok_live():
     command = [
         "streamlink",
-        "--loglevel", "error",
+        "--loglevel", "debug",  # تم تغيير المستوى إلى debug لطباعة تفاصيل الخطأ بوضوح
         "--stream-timeout", "15",
         "--stream-url",
         TIKTOK_URL,
@@ -123,7 +123,15 @@ def is_tiktok_live():
             log("TikTok live detected.")
             return True
 
-        log("TikTok is offline or the stream is unavailable.")
+        # طباعة الخطأ الفعلي القادم من Streamlink لمعرفة سبب المشكلة بالتحديد
+        err_output = result.stderr.strip()
+        if err_output:
+            # طباعة آخر أسطر قليلة من الخطأ لتجنب زحمة السجلات
+            last_lines = "\n".join(err_output.splitlines()[-5:])
+            log(f"TikTok check failed. Streamlink error:\n{last_lines}")
+        else:
+            log("TikTok is offline or the stream is unavailable.")
+            
         return False
 
     except subprocess.TimeoutExpired:
@@ -207,107 +215,3 @@ def run_streaming_session():
             bufsize=0
         )
         active_processes.append(streamlink_proc)
-
-        log("Starting FFmpeg -> YouTube RTMP...")
-
-        ffmpeg_proc = subprocess.Popen(
-            ffmpeg_cmd,
-            stdin=streamlink_proc.stdout,
-            stdout=subprocess.DEVNULL,
-            stderr=None,
-            bufsize=0
-        )
-        active_processes.append(ffmpeg_proc)
-
-        # Close the parent's copy of the pipe.
-        streamlink_proc.stdout.close()
-
-        log("Relay session started.")
-
-        while not stop_requested:
-            if streamlink_proc.poll() is not None:
-                log(
-                    "Streamlink exited with code "
-                    f"{streamlink_proc.returncode}."
-                )
-                break
-
-            if ffmpeg_proc.poll() is not None:
-                log(
-                    "FFmpeg exited with code "
-                    f"{ffmpeg_proc.returncode}."
-                )
-                break
-
-            time.sleep(1)
-
-    except (OSError, subprocess.SubprocessError) as exc:
-        log(f"Relay error: {exc}")
-
-    finally:
-        stop_process(ffmpeg_proc)
-        stop_process(streamlink_proc)
-
-        for proc in (ffmpeg_proc, streamlink_proc):
-            if proc in active_processes:
-                active_processes.remove(proc)
-
-        if streamlink_proc and streamlink_proc.stdout:
-            try:
-                streamlink_proc.stdout.close()
-            except OSError:
-                pass
-
-    duration = time.monotonic() - start_time
-    log(f"Relay session closed after {duration:.1f} seconds.")
-
-    return duration
-
-
-# =========================================================
-# Main supervisor
-# =========================================================
-
-def main():
-    if not YOUTUBE_RTMP:
-        log("ERROR: YOUTUBE_RTMP is empty.")
-        sys.exit(1)
-
-    log("TikTok -> YouTube supervisor started.")
-    log("Video: COPY | Audio: AAC 128 kbps.")
-    log("Automatic reconnection: enabled.")
-
-    while not stop_requested:
-        try:
-            if not is_tiktok_live():
-                wait_interruptibly(CHECK_INTERVAL_OFFLINE)
-                continue
-
-            if stop_requested:
-                break
-
-            duration = run_streaming_session()
-
-            if stop_requested:
-                break
-
-            if duration >= MIN_REAL_SESSION:
-                log(
-                    f"Waiting {CLEANUP_DELAY} seconds "
-                    "before checking for a new live."
-                )
-                wait_interruptibly(CLEANUP_DELAY)
-            else:
-                log(f"Retrying in {RETRY_DELAY} seconds.")
-                wait_interruptibly(RETRY_DELAY)
-
-        except Exception as exc:
-            log(f"Supervisor error: {exc}")
-            wait_interruptibly(RETRY_DELAY)
-
-    stop_all_processes()
-    log("Supervisor stopped cleanly.")
-
-
-if __name__ == "__main__":
-    main()
