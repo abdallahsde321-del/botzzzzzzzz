@@ -12,7 +12,7 @@ from datetime import datetime
 
 TIKTOK_URL = os.getenv(
     "TIKTOK_URL",
-    "https://www.tiktok.com/@almurtadmazin/live"
+    "https://www.tiktok.com/@almurtadmazin/live?enter_from_merge=general_search&enter_method=others_photo&search_id=20261026064225A6A96AB1385BA554B87A&search_keyword=almurtadmazin&search_result_id=7184705875612943366&search_type=general"
 )
 
 YOUTUBE_RTMP = os.getenv(
