@@ -111,10 +111,10 @@ signal.signal(signal.SIGINT, signal_handler)
 
 
 # =========================================================
-# Get Direct Stream URL using yt-dlp
+# Check whether TikTok is live
 # =========================================================
 
-def get_direct_stream_url():
+def is_tiktok_live():
     command = [
         "yt-dlp",
         "--get-url",
@@ -137,45 +137,36 @@ def get_direct_stream_url():
         )
 
         url = result.stdout.strip()
-
         if result.returncode == 0 and url:
-            return url
+            log("TikTok live detected via yt-dlp.")
+            return True
 
-        err_output = result.stderr.strip()
-        if err_output:
-            last_line = err_output.splitlines()[-1]
-            log(f"yt-dlp note: {last_line}")
+        return False
 
-        return None
-
-    except subprocess.TimeoutExpired:
-        log("yt-dlp timed out while getting stream URL.")
-        return None
-    except Exception as exc:
-        log(f"yt-dlp error: {exc}")
-        return None
+    except Exception:
+        return False
 
 
 # =========================================================
-# Run one fresh relay session using FFmpeg directly
+# Run one fresh relay session using yt-dlp MPEG-TS Pipe -> FFmpeg
 # =========================================================
 
 def run_streaming_session():
     start_time = time.monotonic()
+    ytdl_proc = None
     ffmpeg_proc = None
 
-    log("Fetching direct stream URL via yt-dlp...")
-    stream_url = get_direct_stream_url()
-
-    if not stream_url:
-        log("Could not retrieve direct stream URL.")
-        return 0
-
-    log("Direct stream URL acquired successfully.")
-
-    # تمرير Headers و Cookies مع رابط المدخل لكي لا يتم رفض الطلب من تيك توك
-    user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
-    headers_str = f"User-Agent: {user_agent}\r\nCookie: sessionid={TIKTOK_SESSIONID}\r\n"
+    ytdl_cmd = [
+        "yt-dlp",
+        "--no-warnings",
+        "--hls-use-mpegts",  # حل مشكلة توافق صيغة البث مع الأنبوب
+        "-o", "-",
+    ]
+    
+    if os.path.exists("cookies.txt"):
+        ytdl_cmd.extend(["--cookies", "cookies.txt"])
+        
+    ytdl_cmd.append(TIKTOK_URL)
 
     ffmpeg_cmd = [
         "ffmpeg",
@@ -183,10 +174,9 @@ def run_streaming_session():
         "-loglevel", "warning",
         "-nostdin",
 
-        # Headers لمنع خطأ الرفض والانهيار (-11)
-        "-headers", headers_str,
+        # Input from yt-dlp pipe
         "-fflags", "+genpts+discardcorrupt",
-        "-i", stream_url,
+        "-i", "pipe:0",
 
         # Video: copy original encoded video
         "-map", "0:v:0",
@@ -213,19 +203,37 @@ def run_streaming_session():
         if stop_requested:
             return 0
 
+        log("Starting yt-dlp MPEG-TS stream extractor...")
+
+        ytdl_proc = subprocess.Popen(
+            ytdl_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            bufsize=0
+        )
+        active_processes.append(ytdl_proc)
+
         log("Starting FFmpeg -> YouTube RTMP...")
 
         ffmpeg_proc = subprocess.Popen(
             ffmpeg_cmd,
+            stdin=ytdl_proc.stdout,
             stdout=subprocess.DEVNULL,
             stderr=None,
             bufsize=0
         )
         active_processes.append(ffmpeg_proc)
 
+        # Close the parent's copy of the pipe.
+        ytdl_proc.stdout.close()
+
         log("Relay session started.")
 
         while not stop_requested:
+            if ytdl_proc.poll() is not None:
+                log(f"yt-dlp exited with code {ytdl_proc.returncode}.")
+                break
+
             if ffmpeg_proc.poll() is not None:
                 log(f"FFmpeg exited with code {ffmpeg_proc.returncode}.")
                 break
@@ -237,8 +245,11 @@ def run_streaming_session():
 
     finally:
         stop_process(ffmpeg_proc)
-        if ffmpeg_proc in active_processes:
-            active_processes.remove(ffmpeg_proc)
+        stop_process(ytdl_proc)
+
+        for proc in (ffmpeg_proc, ytdl_proc):
+            if proc in active_processes:
+                active_processes.remove(proc)
 
     duration = time.monotonic() - start_time
     log(f"Relay session closed after {duration:.1f} seconds.")
@@ -257,14 +268,13 @@ def main():
 
     setup_cookies_file()
 
-    log("TikTok -> YouTube supervisor started (Headers Fixed mode).")
+    log("TikTok -> YouTube supervisor started (MPEG-TS Pipe Mode).")
     log("Video: COPY | Audio: AAC 128 kbps.")
     log("Automatic reconnection: enabled.")
 
     while not stop_requested:
         try:
-            stream_url = get_direct_stream_url()
-            if not stream_url:
+            if not is_tiktok_live():
                 log("TikTok is offline or the stream is unavailable.")
                 wait_interruptibly(CHECK_INTERVAL_OFFLINE)
                 continue
