@@ -3,31 +3,35 @@ import sys
 import time
 import signal
 import subprocess
-import threading
 from datetime import datetime
 
-# ================== SETTINGS ==================
+# =========================================================
+# Configuration
+# =========================================================
 
 TIKTOK_URL = os.getenv(
     "TIKTOK_URL",
     "https://www.tiktok.com/@almurtadmazin/live"
+)
+
+YOUTUBE_RTMP = os.getenv(
+    "YOUTUBE_RTMP",
+    "rtmp://a.rtmp.youtube.com/live2/9gs2-gayu-3pjh-wda0-1tp7"
 ).strip()
 
-# دعم المفتاح المخفي YOUTUBE_STREAM_KEY أو الرابط المباشر YOUTUBE_RTMP
-STREAM_KEY = os.getenv("YOUTUBE_STREAM_KEY", "").strip()
-DEFAULT_RTMP = f"rtmp://a.rtmp.youtube.com/live2/{STREAM_KEY}" if STREAM_KEY else "rtmp://a.rtmp.youtube.com/live2/9gs2-gayu-3pjh-wda0-1tp7"
-
-YOUTUBE_RTMP = os.getenv("YOUTUBE_RTMP", DEFAULT_RTMP).strip()
-
-CHECK_INTERVAL_OFFLINE = 15
+CHECK_INTERVAL_OFFLINE = 10
 RETRY_DELAY = 5
+CLEANUP_DELAY = 8
+PROBE_TIMEOUT = 25
+MIN_REAL_SESSION = 20
 
-stop_event = threading.Event()
-streamlink_process = None
-ffmpeg_process = None
+stop_requested = False
+active_processes = []
 
 
-# ================== LOGGING ==================
+# =========================================================
+# Logging
+# =========================================================
 
 def log(message):
     print(
@@ -36,218 +40,273 @@ def log(message):
     )
 
 
-# ================== PROCESS MANAGEMENT ==================
+def wait_interruptibly(seconds):
+    end_time = time.monotonic() + seconds
 
-def stop_process(process):
-    if process is None or process.poll() is not None:
+    while not stop_requested and time.monotonic() < end_time:
+        time.sleep(min(1, max(0, end_time - time.monotonic())))
+
+
+# =========================================================
+# Process cleanup
+# =========================================================
+
+def stop_process(proc):
+    if proc is None:
         return
 
     try:
-        process.terminate()
-        process.wait(timeout=5)
-    except subprocess.TimeoutExpired:
+        if proc.poll() is not None:
+            return
+
+        proc.terminate()
+
         try:
-            process.kill()
-            process.wait(timeout=3)
-        except Exception:
-            pass
-    except Exception as exc:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=3)
+
+    except (OSError, subprocess.SubprocessError) as exc:
         log(f"Process cleanup warning: {exc}")
 
 
-def cleanup():
-    global streamlink_process, ffmpeg_process
+def stop_all_processes():
+    # Close FFmpeg before Streamlink.
+    for proc in reversed(active_processes[:]):
+        stop_process(proc)
 
-    stop_process(ffmpeg_process)
-    ffmpeg_process = None
-
-    stop_process(streamlink_process)
-    streamlink_process = None
+    active_processes.clear()
 
 
 def signal_handler(sig, frame):
-    log("Shutdown signal received. Cleaning up...")
-    stop_event.set()
-    cleanup()
+    global stop_requested
+
+    if not stop_requested:
+        log("Shutdown requested.")
+        stop_requested = True
 
 
 signal.signal(signal.SIGTERM, signal_handler)
 signal.signal(signal.SIGINT, signal_handler)
 
 
-# ================== STREAMLINK ==================
+# =========================================================
+# Check whether TikTok is live
+# =========================================================
 
-def make_streamlink_command():
-    return [
+def is_tiktok_live():
+    command = [
         "streamlink",
-        "--loglevel", "warning",
-        # إضافة User-Agent لتجاوز حظر خوادم TikTok وخير 404
-        "--http-header", "User-Agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-        "--hls-live-edge", "4",
-        "--ringbuffer-size", "128M",
-        "--retry-streams", "5",
-        "--retry-max", "10",
-        "--stream-segment-attempts", "5",
-        "--stream-segment-timeout", "10",
-        "--stream-timeout", "20",
-        "--stdout",
+        "--loglevel", "error",
+        "--stream-timeout", "15",
+        "--stream-url",
         TIKTOK_URL,
-        "best,720p,480p,worst"
+        "best"
     ]
 
+    try:
+        result = subprocess.run(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=PROBE_TIMEOUT,
+            check=False
+        )
 
-# ================== FFMPEG ==================
+        url = result.stdout.strip()
 
-def make_ffmpeg_command():
-    return [
+        if result.returncode == 0 and url.startswith(
+            ("http://", "https://")
+        ):
+            log("TikTok live detected.")
+            return True
+
+        log("TikTok is offline or the stream is unavailable.")
+        return False
+
+    except subprocess.TimeoutExpired:
+        log("TikTok detection timed out.")
+        return False
+
+    except OSError as exc:
+        log(f"Streamlink detection error: {exc}")
+        return False
+
+
+# =========================================================
+# Run one fresh relay session
+# =========================================================
+
+def run_streaming_session():
+    start_time = time.monotonic()
+    streamlink_proc = None
+    ffmpeg_proc = None
+
+    streamlink_cmd = [
+        "streamlink",
+        "--loglevel", "warning",
+        "--ringbuffer-size", "512M",
+        "--stream-segment-threads", "2",
+        "--retry-streams", "1",
+        "--retry-max", "1",
+        "--stream-segment-attempts", "3",
+        "--stream-segment-timeout", "15",
+        "--stream-timeout", "20",
+        "--http-header",
+        "User-Agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/125.0.0.0 Safari/537.36",
+        "--stdout",
+        TIKTOK_URL,
+        "best"
+    ]
+
+    ffmpeg_cmd = [
         "ffmpeg",
         "-hide_banner",
         "-loglevel", "warning",
-        "-stats_period", "10",
         "-nostdin",
 
-        # إعدادات حجم التحليل للتعرف على ترميز HEVC / Enhanced FLV
-        "-probesize", "10000000",
-        "-analyzeduration", "10000000",
-
-        # Input
-        "-thread_queue_size", "1024",
+        # Input from Streamlink
+        "-fflags", "+genpts+discardcorrupt",
         "-i", "pipe:0",
 
-        # VIDEO: Re-encode to libx264 for YouTube
+        # Video: copy original encoded video
         "-map", "0:v:0",
-        "-c:v", "libx264",
-        "-preset", "ultrafast",
-        "-tune", "zerolatency",
-        "-pix_fmt", "yuv420p",
-        "-g", "60",
+        "-c:v", "copy",
 
-        # AUDIO: AAC 128k
+        # Audio: AAC encoding
         "-map", "0:a:0?",
         "-c:a", "aac",
         "-b:a", "128k",
         "-ar", "44100",
         "-ac", "2",
-        "-af", "aresample=async=1000:min_hard_comp=0.100000:first_pts=0",
+        "-af", "aresample=async=1000:first_pts=0",
 
-        # Timestamps & Latency Optimizations
-        "-fflags", "+genpts+discardcorrupt+nobuffer+fastseek",
+        # RTMP/FLV output
         "-avoid_negative_ts", "make_zero",
-        "-use_wallclock_as_timestamps", "1",
-
-        # Output to YouTube RTMP
+        "-max_interleave_delta", "1000000",
         "-flvflags", "no_duration_filesize",
+        "-flush_packets", "1",
         "-f", "flv",
         YOUTUBE_RTMP
     ]
 
+    try:
+        if stop_requested:
+            return 0
 
-# ================== START STREAM ==================
+        log("Starting Streamlink...")
 
-def start_stream():
-    global streamlink_process, ffmpeg_process
+        streamlink_proc = subprocess.Popen(
+            streamlink_cmd,
+            stdout=subprocess.PIPE,
+            stderr=None,
+            bufsize=0
+        )
+        active_processes.append(streamlink_proc)
 
-    if stop_event.is_set():
-        return False
+        log("Starting FFmpeg -> YouTube RTMP...")
 
-    log("Connecting to TikTok Live...")
+        ffmpeg_proc = subprocess.Popen(
+            ffmpeg_cmd,
+            stdin=streamlink_proc.stdout,
+            stdout=subprocess.DEVNULL,
+            stderr=None,
+            bufsize=0
+        )
+        active_processes.append(ffmpeg_proc)
 
-    streamlink_process = subprocess.Popen(
-        make_streamlink_command(),
-        stdout=subprocess.PIPE,
-        stderr=None,
-        bufsize=0
-    )
+        # Close the parent's copy of the pipe.
+        streamlink_proc.stdout.close()
 
-    for _ in range(4):
-        if stop_event.is_set():
-            return False
+        log("Relay session started.")
 
-        if streamlink_process.poll() is not None:
-            log("Streamlink exited. TikTok may be offline.")
-            return False
+        while not stop_requested:
+            if streamlink_proc.poll() is not None:
+                log(
+                    "Streamlink exited with code "
+                    f"{streamlink_proc.returncode}."
+                )
+                break
 
-        time.sleep(0.5)
+            if ffmpeg_proc.poll() is not None:
+                log(
+                    "FFmpeg exited with code "
+                    f"{ffmpeg_proc.returncode}."
+                )
+                break
 
-    if stop_event.is_set():
-        return False
+            time.sleep(1)
 
-    log("Starting FFmpeg -> YouTube RTMP...")
+    except (OSError, subprocess.SubprocessError) as exc:
+        log(f"Relay error: {exc}")
 
-    ffmpeg_process = subprocess.Popen(
-        make_ffmpeg_command(),
-        stdin=streamlink_process.stdout,
-        stdout=subprocess.DEVNULL,
-        stderr=None,
-        bufsize=0
-    )
+    finally:
+        stop_process(ffmpeg_proc)
+        stop_process(streamlink_proc)
 
-    streamlink_process.stdout.close()
+        for proc in (ffmpeg_proc, streamlink_proc):
+            if proc in active_processes:
+                active_processes.remove(proc)
 
-    log("Relay started. Video: H.264 (libx264 ultrafast); Audio: AAC 128k.")
+        if streamlink_proc and streamlink_proc.stdout:
+            try:
+                streamlink_proc.stdout.close()
+            except OSError:
+                pass
 
-    while not stop_event.is_set():
-        sl_code = streamlink_process.poll()
-        ff_code = ffmpeg_process.poll()
+    duration = time.monotonic() - start_time
+    log(f"Relay session closed after {duration:.1f} seconds.")
 
-        if sl_code is not None:
-            log(f"Streamlink stopped (exit code {sl_code}).")
-            return False
-
-        if ff_code is not None:
-            log(f"FFmpeg stopped (exit code {ff_code}).")
-            return False
-
-        time.sleep(1)
-
-    return False
+    return duration
 
 
-# ================== MAIN LOOP ==================
+# =========================================================
+# Main supervisor
+# =========================================================
 
 def main():
-    if not TIKTOK_URL:
-        log("ERROR: TIKTOK_URL is empty.")
-        sys.exit(1)
-
     if not YOUTUBE_RTMP:
-        log("ERROR: Set YOUTUBE_RTMP environment variable.")
+        log("ERROR: YOUTUBE_RTMP is empty.")
         sys.exit(1)
 
-    log("TikTok -> YouTube Relay Started")
-    log("Video encoding: H.264 (libx264 ultrafast)")
-    log("Audio encoding: AAC 128k")
-    log("Automatic reconnection: ON")
+    log("TikTok -> YouTube supervisor started.")
+    log("Video: COPY | Audio: AAC 128 kbps.")
+    log("Automatic reconnection: enabled.")
 
-    while not stop_event.is_set():
-        started_at = time.monotonic()
-
+    while not stop_requested:
         try:
-            cleanup()
-            start_stream()
+            if not is_tiktok_live():
+                wait_interruptibly(CHECK_INTERVAL_OFFLINE)
+                continue
+
+            if stop_requested:
+                break
+
+            duration = run_streaming_session()
+
+            if stop_requested:
+                break
+
+            if duration >= MIN_REAL_SESSION:
+                log(
+                    f"Waiting {CLEANUP_DELAY} seconds "
+                    "before checking for a new live."
+                )
+                wait_interruptibly(CLEANUP_DELAY)
+            else:
+                log(f"Retrying in {RETRY_DELAY} seconds.")
+                wait_interruptibly(RETRY_DELAY)
 
         except Exception as exc:
-            log(f"Unexpected error: {exc}")
+            log(f"Supervisor error: {exc}")
+            wait_interruptibly(RETRY_DELAY)
 
-        finally:
-            cleanup()
-
-        if stop_event.is_set():
-            break
-
-        elapsed = time.monotonic() - started_at
-
-        if elapsed > 60:
-            delay = RETRY_DELAY
-            log(f"Stream disconnected. Retrying in {delay}s...")
-        else:
-            delay = CHECK_INTERVAL_OFFLINE
-            log(f"Stream unavailable. Checking again in {delay}s...")
-
-        stop_event.wait(delay)
-
-    cleanup()
-    log("Relay stopped cleanly.")
+    stop_all_processes()
+    log("Supervisor stopped cleanly.")
 
 
 if __name__ == "__main__":
