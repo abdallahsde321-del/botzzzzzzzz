@@ -16,10 +16,9 @@ TIKTOK_URL = os.getenv(
 
 YOUTUBE_RTMP = os.getenv(
     "YOUTUBE_RTMP",
-    "rtmp://a.rtmp.youtube.com/live2/9gs2-gayu-3pjh-wda0-1tp7"
+    "rtmp://a.rtmp.youtube.com/live2/5czj-a0sq-5cmp-4aps-bq5h"
 ).strip()
 
-# كوكيز الجلسة لتخطي قيود تيك توك وبث الحسابات المقيدة
 TIKTOK_SESSIONID = os.getenv(
     "TIKTOK_SESSIONID",
     "8df3a0ebb15a97c1452dc36915f86aef"
@@ -112,10 +111,10 @@ signal.signal(signal.SIGINT, signal_handler)
 
 
 # =========================================================
-# Check whether TikTok is live using yt-dlp + Cookies
+# Get Direct Stream URL using yt-dlp
 # =========================================================
 
-def is_tiktok_live():
+def get_direct_stream_url():
     command = [
         "yt-dlp",
         "--get-url",
@@ -140,45 +139,39 @@ def is_tiktok_live():
         url = result.stdout.strip()
 
         if result.returncode == 0 and url:
-            log("TikTok live detected via yt-dlp.")
-            return True
+            return url
 
         err_output = result.stderr.strip()
         if err_output:
             last_line = err_output.splitlines()[-1]
-            log(f"yt-dlp check note: {last_line}")
-        else:
-            log("TikTok is offline or the stream is unavailable.")
+            log(f"yt-dlp note: {last_line}")
 
-        return False
+        return None
 
     except subprocess.TimeoutExpired:
-        log("TikTok detection timed out.")
-        return False
-
+        log("yt-dlp timed out while getting stream URL.")
+        return None
     except Exception as exc:
-        log(f"yt-dlp detection error: {exc}")
-        return False
+        log(f"yt-dlp error: {exc}")
+        return None
 
 
 # =========================================================
-# Run one fresh relay session using yt-dlp + ffmpeg
+# Run one fresh relay session using FFmpeg directly
 # =========================================================
 
 def run_streaming_session():
     start_time = time.monotonic()
-    ytdl_proc = None
     ffmpeg_proc = None
 
-    ytdl_cmd = [
-        "yt-dlp",
-        "--no-warnings",
-    ]
-    
-    if os.path.exists("cookies.txt"):
-        ytdl_cmd.extend(["--cookies", "cookies.txt"])
-        
-    ytdl_cmd.extend(["-o", "-", TIKTOK_URL])
+    log("Fetching direct stream URL via yt-dlp...")
+    stream_url = get_direct_stream_url()
+
+    if not stream_url:
+        log("Could not retrieve direct stream URL.")
+        return 0
+
+    log("Direct stream URL acquired successfully.")
 
     ffmpeg_cmd = [
         "ffmpeg",
@@ -186,9 +179,9 @@ def run_streaming_session():
         "-loglevel", "warning",
         "-nostdin",
 
-        # Input from yt-dlp pipe
+        # Input stream URL directly to FFmpeg
         "-fflags", "+genpts+discardcorrupt",
-        "-i", "pipe:0",
+        "-i", stream_url,
 
         # Video: copy original encoded video
         "-map", "0:v:0",
@@ -215,37 +208,19 @@ def run_streaming_session():
         if stop_requested:
             return 0
 
-        log("Starting yt-dlp stream extractor...")
-
-        ytdl_proc = subprocess.Popen(
-            ytdl_cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            bufsize=0
-        )
-        active_processes.append(ytdl_proc)
-
         log("Starting FFmpeg -> YouTube RTMP...")
 
         ffmpeg_proc = subprocess.Popen(
             ffmpeg_cmd,
-            stdin=ytdl_proc.stdout,
             stdout=subprocess.DEVNULL,
             stderr=None,
             bufsize=0
         )
         active_processes.append(ffmpeg_proc)
 
-        # Close the parent's copy of the pipe.
-        ytdl_proc.stdout.close()
-
         log("Relay session started.")
 
         while not stop_requested:
-            if ytdl_proc.poll() is not None:
-                log(f"yt-dlp exited with code {ytdl_proc.returncode}.")
-                break
-
             if ffmpeg_proc.poll() is not None:
                 log(f"FFmpeg exited with code {ffmpeg_proc.returncode}.")
                 break
@@ -257,11 +232,8 @@ def run_streaming_session():
 
     finally:
         stop_process(ffmpeg_proc)
-        stop_process(ytdl_proc)
-
-        for proc in (ffmpeg_proc, ytdl_proc):
-            if proc in active_processes:
-                active_processes.remove(proc)
+        if ffmpeg_proc in active_processes:
+            active_processes.remove(ffmpeg_proc)
 
     duration = time.monotonic() - start_time
     log(f"Relay session closed after {duration:.1f} seconds.")
@@ -280,13 +252,16 @@ def main():
 
     setup_cookies_file()
 
-    log("TikTok -> YouTube supervisor started (using yt-dlp + Cookies).")
+    log("TikTok -> YouTube supervisor started (Direct URL mode).")
     log("Video: COPY | Audio: AAC 128 kbps.")
     log("Automatic reconnection: enabled.")
 
     while not stop_requested:
         try:
-            if not is_tiktok_live():
+            # Check if live using the same get_direct_stream_url function
+            stream_url = get_direct_stream_url()
+            if not stream_url:
+                log("TikTok is offline or the stream is unavailable.")
                 wait_interruptibly(CHECK_INTERVAL_OFFLINE)
                 continue
 
